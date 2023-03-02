@@ -1,4 +1,3 @@
-#![cfg_attr(not(feature = "stable"), feature(proc_macro_span))]
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 //! Implementation of the server_fn macro.
@@ -6,11 +5,11 @@
 //! This crate contains the implementation of the server_fn macro. [server_macro_impl] can be used to implement custom versions of the macro for different frameworks that allow users to pass a custom context from the server to the server function.
 
 use proc_macro2::{Literal, TokenStream as TokenStream2};
-use proc_macro_error::abort;
 use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
+    spanned::Spanned,
     *,
 };
 
@@ -68,6 +67,7 @@ fn fn_arg_is_cx(f: &syn::FnArg, server_context: &ServerContext) -> bool {
 pub fn server_macro_impl(
     args: TokenStream2,
     body: TokenStream2,
+    trait_obj_wrapper: Type,
     server_context: Option<ServerContext>,
     server_fn_path: Option<Path>,
 ) -> Result<TokenStream2> {
@@ -86,7 +86,7 @@ pub fn server_macro_impl(
     let vis = body.vis;
     let block = body.block;
 
-    let fields = body
+    let fields: Result<Vec<_>> = body
         .inputs
         .iter()
         .filter(|f| {
@@ -96,18 +96,15 @@ pub fn server_macro_impl(
                 true
             }
         })
-        .map(|f| {
-            let typed_arg = match f {
-                FnArg::Receiver(_) => {
-                    abort!(
-                        f,
-                        "cannot use receiver types in server function macro"
-                    )
-                }
-                FnArg::Typed(t) => t,
-            };
-            quote! { pub #typed_arg }
-        });
+        .map(|f| match f {
+            FnArg::Receiver(_) => Err(Error::new(
+                f.span(),
+                "cannot use receiver types in server function macro",
+            )),
+            FnArg::Typed(t) => Ok(quote! { pub #t }),
+        })
+        .collect();
+    let fields = fields?;
 
     let cx_arg = body.inputs.iter().next().and_then(|f| {
         server_context
@@ -132,27 +129,35 @@ pub fn server_macro_impl(
         quote! {}
     };
 
-    let fn_args = body.inputs.iter().map(|f| {
-        let typed_arg = match f {
-            FnArg::Receiver(_) => {
-                abort!(f, "cannot use receiver types in server function macro")
-            }
-            FnArg::Typed(t) => t,
-        };
-        let is_cx = if let Some(ctx) = &server_context {
-            !fn_arg_is_cx(f, ctx)
-        } else {
-            true
-        };
-        if is_cx {
-            quote! {
-                #[allow(unused)]
-                #typed_arg
-            }
-        } else {
-            quote! { #typed_arg }
-        }
-    });
+    let fn_args: Result<Vec<_>> = body
+        .inputs
+        .iter()
+        .map(|f| {
+            let typed_arg = match f {
+                FnArg::Receiver(_) => {
+                    return Err(Error::new(
+                        f.span(),
+                        "cannot use receiver types in server function macro",
+                    ));
+                }
+                FnArg::Typed(t) => t,
+            };
+            let is_cx = if let Some(ctx) = &server_context {
+                !fn_arg_is_cx(f, ctx)
+            } else {
+                true
+            };
+            Ok(if is_cx {
+                quote! {
+                    #[allow(unused)]
+                    #typed_arg
+                }
+            } else {
+                quote! { #typed_arg }
+            })
+        })
+        .collect();
+    let fn_args = fn_args?;
     let fn_args_2 = fn_args.clone();
 
     let field_names = body.inputs.iter().filter_map(|f| match f {
@@ -189,10 +194,10 @@ pub fn server_macro_impl(
             }
         }
 
-        abort!(
-            return_ty,
-            "server functions should return Result<T, ServerFnError>"
-        );
+        return Err(Error::new(
+            return_ty.span(),
+            "server functions should return Result<T, ServerFnError>",
+        ));
     };
 
     let server_ctx_path = if let Some(ctx) = &server_context {
@@ -207,35 +212,51 @@ pub fn server_macro_impl(
         .unwrap_or_else(|| quote! { server_fn });
 
     Ok(quote::quote! {
-        #[derive(Clone, Debug, ::serde::Serialize, ::serde::Deserialize)]
+        #[derive(Clone, Debug, #server_fn_path::serde::Serialize, #server_fn_path::serde::Deserialize)]
         pub struct #struct_name {
             #(#fields),*
+        }
+
+        impl #struct_name {
+            const URL: &str = #server_fn_path::const_format::concatcp!(#fn_name_as_str, #server_fn_path::xxhash_rust::const_xxh64::xxh64(concat!(env!("CARGO_MANIFEST_DIR"), ":", file!(), ":", line!(), ":", column!()).as_bytes(), 0));
+            const PREFIX: &str = #prefix;
+            const ENCODING: #server_fn_path::Encoding = #encoding;
+        }
+
+        #[cfg(feature = "ssr")]
+        #server_fn_path::inventory::submit! {
+            #trait_obj_wrapper::new(#server_fn_path::ServerFnTraitObj::new(
+                #struct_name::PREFIX,
+                #struct_name::URL,
+                #struct_name::ENCODING,
+                <#struct_name as #server_fn_path::ServerFn<#server_ctx_path>>::call_from_bytes,
+            ))
         }
 
         impl #server_fn_path::ServerFn<#server_ctx_path> for #struct_name {
             type Output = #output_ty;
 
             fn prefix() -> &'static str {
-                #prefix
+                Self::PREFIX
             }
 
             fn url() -> &'static str {
-                #server_fn_path::const_format::concatcp!(#fn_name_as_str, #server_fn_path::xxhash_rust::const_xxh64::xxh64(concat!(env!("CARGO_MANIFEST_DIR"), ":", file!(), ":", line!(), ":", column!()).as_bytes(), 0))
+                Self::URL
             }
 
             fn encoding() -> #server_fn_path::Encoding {
-                #encoding
+                Self::ENCODING
             }
 
             #[cfg(feature = "ssr")]
-            fn call_fn(self, cx: #server_ctx_path) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Output, server_fn::ServerFnError>>>> {
+            fn call_fn(self, cx: #server_ctx_path) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Output, #server_fn_path::ServerFnError>>>> {
                 let #struct_name { #(#field_names),* } = self;
                 #cx_assign_statement;
                 Box::pin(async move { #fn_name( #cx_fn_arg #(#field_names_2),*).await })
             }
 
             #[cfg(not(feature = "ssr"))]
-            fn call_fn_client(self, cx: #server_ctx_path) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Output, server_fn::ServerFnError>>>> {
+            fn call_fn_client(self, cx: #server_ctx_path) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Self::Output, #server_fn_path::ServerFnError>>>> {
                 let #struct_name { #(#field_names_3),* } = self;
                 Box::pin(async move { #fn_name( #cx_fn_arg #(#field_names_4),*).await })
             }
@@ -248,8 +269,8 @@ pub fn server_macro_impl(
 
         #[cfg(not(feature = "ssr"))]
         #vis async fn #fn_name(#(#fn_args_2),*) #output_arrow #return_ty {
-            let prefix = #struct_name::prefix().to_string();
-            let url = prefix + "/" + #struct_name::url();
+            let prefix = #struct_name::PREFIX.to_string();
+            let url = prefix + "/" + #struct_name::URL;
             #server_fn_path::call_server_fn(&url, #struct_name { #(#field_names_5),* }, #encoding).await
         }
     })
@@ -271,12 +292,18 @@ impl Parse for ServerFnName {
         let _comma2 = input.parse()?;
         let encoding = input
             .parse::<Literal>()
-            .map(|encoding| match encoding.to_string().as_str() {
-                "\"Url\"" => syn::parse_quote!(Encoding::Url),
-                "\"Cbor\"" => syn::parse_quote!(Encoding::Cbor),
-                _ => abort!(encoding, "Encoding Not Found"),
-            })
-            .unwrap_or(syn::parse_quote!(Encoding::Url));
+            .map(|lit| lit.to_string())
+            .unwrap_or("\"Url\"".to_string());
+        let encoding = match &*encoding {
+            "\"Url\"" => syn::parse_quote!(Encoding::Url),
+            "\"Cbor\"" => syn::parse_quote!(Encoding::Cbor),
+            _ => {
+                return Err(syn::Error::new(
+                    encoding.span(),
+                    "Encoding Not Found",
+                ))
+            }
+        };
 
         Ok(Self {
             struct_name,
