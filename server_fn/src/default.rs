@@ -93,7 +93,7 @@ pub struct DefaultServerFnTraitObj(ServerFnTraitObj<()>);
 #[cfg(any(feature = "ssr", doc))]
 impl DefaultServerFnTraitObj {
     /// Creates a new server function with the given prefix, URL, encoding, and function.
-    pub const fn new(f: ServerFnTraitObj<()>) -> Self {
+    pub const fn from_generic_server_fn(f: ServerFnTraitObj<()>) -> Self {
         Self(f)
     }
 }

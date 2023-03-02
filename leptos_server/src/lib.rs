@@ -106,7 +106,9 @@ impl std::ops::DerefMut for ServerFnTraitObj {
 #[cfg(any(feature = "ssr", doc))]
 impl ServerFnTraitObj {
     /// Create a new `ServerFnTraitObj` from a `server_fn::ServerFnTraitObj`.
-    pub const fn new(server_fn: server_fn::ServerFnTraitObj<Scope>) -> Self {
+    pub const fn from_generic_server_fn(
+        server_fn: server_fn::ServerFnTraitObj<Scope>,
+    ) -> Self {
         Self(server_fn)
     }
 }

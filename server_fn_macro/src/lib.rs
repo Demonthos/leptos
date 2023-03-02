@@ -45,7 +45,8 @@ fn fn_arg_is_cx(f: &syn::FnArg, server_context: &ServerContext) -> bool {
 ///
 /// The paths passed into this function are used in the generated code, so they must be in scope when the macro is called.
 ///
-/// ```ignore
+/// # Macro Crate
+/// ```rust, ignore
 /// #[proc_macro_attribute]
 /// pub fn server(args: proc_macro::TokenStream, s: TokenStream) -> TokenStream {
 ///     let server_context = Some(ServerContext {
@@ -60,6 +61,39 @@ fn fn_arg_is_cx(f: &syn::FnArg, server_context: &ServerContext) -> bool {
 ///     ) {
 ///         Err(e) => e.to_compile_error().into(),
 ///         Ok(s) => s.to_token_stream().into(),
+///     }
+/// }
+/// ```
+///
+/// # Main Crate
+/// ```rust, ignore
+/// pub use macro_crate::server;
+///
+/// // collect the server functions into a map
+/// #[cfg(any(feature = "ssr", doc))]
+/// lazy_static::lazy_static! {
+///     static ref REGISTERED_SERVER_FUNCTIONS: Arc<RwLock<HashMap<&'static str, &'static MyServerFnTraitObj>>> = {
+///         let mut map = HashMap::new();
+///         for server_fn in inventory::iter::<MyServerFnTraitObj> {
+///             map.insert(server_fn.0.url(), server_fn);
+///         }
+///         Arc::new(RwLock::new(map))
+///     };
+/// }
+///
+/// // collect all of the server functions into an iterator
+/// #[cfg(any(feature = "ssr", doc))]
+/// inventory::collect!(MyServerFnTraitObj);
+///
+/// // a server function wrapper that your framework can use to call the server function
+/// #[cfg(any(feature = "ssr", doc))]
+/// pub struct MyServerFnTraitObj(ServerFnTraitObj<MyContext>);
+///
+/// #[cfg(any(feature = "ssr", doc))]
+/// impl MyServerFnTraitObj {
+///     // This *MUST* be called `from_generic_server_fn` and be const for the macro to work.
+///     pub const fn from_generic_server_fn(f: ServerFnTraitObj<MyContext>) -> Self {
+///         Self(f)
 ///     }
 /// }
 /// ```
@@ -225,7 +259,7 @@ pub fn server_macro_impl(
 
         #[cfg(feature = "ssr")]
         #server_fn_path::inventory::submit! {
-            #trait_obj_wrapper::new(#server_fn_path::ServerFnTraitObj::new(
+            #trait_obj_wrapper::from_generic_server_fn(#server_fn_path::ServerFnTraitObj::new(
                 #struct_name::PREFIX,
                 #struct_name::URL,
                 #struct_name::ENCODING,
