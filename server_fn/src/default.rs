@@ -8,15 +8,15 @@ use std::{
 };
 
 #[cfg(any(feature = "ssr", doc))]
-lazy_static::lazy_static! {
-    static ref REGISTERED_SERVER_FUNCTIONS: Arc<RwLock<HashMap<&'static str, &'static DefaultServerFnTraitObj>>> = {
-        let mut map = HashMap::new();
-        for server_fn in inventory::iter::<DefaultServerFnTraitObj> {
-            map.insert(server_fn.0.url(), server_fn);
-        }
-        Arc::new(RwLock::new(map))
-    };
-}
+static REGISTERED_SERVER_FUNCTIONS: once_cell::sync::Lazy<
+    Arc<RwLock<HashMap<&'static str, &'static DefaultServerFnTraitObj>>>,
+> = once_cell::sync::Lazy::new(|| {
+    let mut map = HashMap::new();
+    for server_fn in inventory::iter::<DefaultServerFnTraitObj> {
+        map.insert(server_fn.0.url(), server_fn);
+    }
+    Arc::new(RwLock::new(map))
+});
 
 #[cfg(any(feature = "ssr"))]
 inventory::collect!(DefaultServerFnTraitObj);
