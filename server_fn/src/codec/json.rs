@@ -1,6 +1,6 @@
 use super::{Encoding, FromReq, FromRes, Streaming};
 use crate::{
-    error::{NoCustomError, ServerFnError},
+    error::{CustomServerFnError, ServerFnErrorErr},
     request::{ClientReq, Req},
     response::{ClientRes, Res},
     IntoReq, IntoRes,
@@ -22,14 +22,11 @@ impl<CustErr, T, Request> IntoReq<Json, Request, CustErr> for T
 where
     Request: ClientReq<CustErr>,
     T: Serialize + Send,
+    CustErr: CustomServerFnError,
 {
-    fn into_req(
-        self,
-        path: &str,
-        accepts: &str,
-    ) -> Result<Request, ServerFnError<CustErr>> {
+    fn into_req(self, path: &str, accepts: &str) -> Result<Request, CustErr> {
         let data = serde_json::to_string(&self)
-            .map_err(|e| ServerFnError::Serialization(e.to_string()))?;
+            .map_err(|e| ServerFnErrorErr::Serialization(e.to_string()))?;
         Request::try_new_post(path, accepts, Json::CONTENT_TYPE, data)
     }
 }
@@ -38,11 +35,13 @@ impl<CustErr, T, Request> FromReq<Json, Request, CustErr> for T
 where
     Request: Req<CustErr> + Send + 'static,
     T: DeserializeOwned,
+    CustErr: CustomServerFnError,
 {
-    async fn from_req(req: Request) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_req(req: Request) -> Result<Self, CustErr> {
         let string_data = req.try_into_string().await?;
         serde_json::from_str::<Self>(&string_data)
-            .map_err(|e| ServerFnError::Args(e.to_string()))
+            .map_err(|e| ServerFnErrorErr::Args(e.to_string()))
+            .map_err(Into::into)
     }
 }
 
@@ -50,10 +49,11 @@ impl<CustErr, T, Response> IntoRes<Json, Response, CustErr> for T
 where
     Response: Res<CustErr>,
     T: Serialize + Send,
+    CustErr: CustomServerFnError,
 {
-    async fn into_res(self) -> Result<Response, ServerFnError<CustErr>> {
+    async fn into_res(self) -> Result<Response, CustErr> {
         let data = serde_json::to_string(&self)
-            .map_err(|e| ServerFnError::Serialization(e.to_string()))?;
+            .map_err(|e| ServerFnErrorErr::Serialization(e.to_string()))?;
         Response::try_from_string(Json::CONTENT_TYPE, data)
     }
 }
@@ -62,11 +62,13 @@ impl<CustErr, T, Response> FromRes<Json, Response, CustErr> for T
 where
     Response: ClientRes<CustErr> + Send,
     T: DeserializeOwned + Send,
+    CustErr: CustomServerFnError,
 {
-    async fn from_res(res: Response) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_res(res: Response) -> Result<Self, CustErr> {
         let data = res.try_into_string().await?;
         serde_json::from_str(&data)
-            .map_err(|e| ServerFnError::Deserialization(e.to_string()))
+            .map_err(|e| ServerFnErrorErr::Deserialization(e.to_string()))
+            .map_err(Into::into)
     }
 }
 
@@ -102,8 +104,8 @@ impl Encoding for StreamingJson {
 /// end before the output will begin.
 ///
 /// Streaming requests are only allowed over HTTP2 or HTTP3.
-pub struct JsonStream<T, CustErr = NoCustomError>(
-    Pin<Box<dyn Stream<Item = Result<T, ServerFnError<CustErr>>> + Send>>,
+pub struct JsonStream<T, CustErr = ServerFnErrorErr>(
+    Pin<Box<dyn Stream<Item = Result<T, CustErr>> + Send>>,
 );
 
 impl<T, CustErr> std::fmt::Debug for JsonStream<T, CustErr> {
@@ -112,20 +114,20 @@ impl<T, CustErr> std::fmt::Debug for JsonStream<T, CustErr> {
     }
 }
 
-impl<T> JsonStream<T> {
+impl<T, CustErr> JsonStream<T, CustErr> {
     /// Creates a new `ByteStream` from the given stream.
     pub fn new(
-        value: impl Stream<Item = Result<T, ServerFnError>> + Send + 'static,
+        value: impl Stream<Item = Result<T, CustErr>> + Send + 'static,
     ) -> Self {
-        Self(Box::pin(value.map(|value| value.map(Into::into))))
+        Self(Box::pin(
+            value.map(|value| value.map(Into::into).map_err(Into::into)),
+        ))
     }
 }
 
 impl<T, CustErr> JsonStream<T, CustErr> {
     /// Consumes the wrapper, returning a stream of text.
-    pub fn into_inner(
-        self,
-    ) -> impl Stream<Item = Result<T, ServerFnError<CustErr>>> + Send {
+    pub fn into_inner(self) -> impl Stream<Item = Result<T, CustErr>> + Send {
         self.0
     }
 }
@@ -145,11 +147,7 @@ where
     S: Stream<Item = T> + Send + 'static,
     T: Serialize + 'static,
 {
-    fn into_req(
-        self,
-        path: &str,
-        accepts: &str,
-    ) -> Result<Request, ServerFnError<CustErr>> {
+    fn into_req(self, path: &str, accepts: &str) -> Result<Request, CustErr> {
         let data: JsonStream<T> = self.into();
         Request::try_new_streaming(
             path,
@@ -171,12 +169,13 @@ where
     S: Stream<Item = T> + From<JsonStream<T>> + Send + 'static,
     T: DeserializeOwned + 'static,
 {
-    async fn from_req(req: Request) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_req(req: Request) -> Result<Self, CustErr> {
         let data = req.try_into_stream()?;
         let s = JsonStream::new(data.map(|chunk| {
             chunk.and_then(|bytes| {
                 serde_json::from_slice(bytes.as_ref())
-                    .map_err(|e| ServerFnError::Deserialization(e.to_string()))
+                    .map_err(|e| ServerFnErrorErr::Deserialization(e.to_string()))
+                    .map_err(Into::into)
             })
         }));
         Ok(s.into())
@@ -187,33 +186,36 @@ impl<CustErr, T, Response> IntoRes<StreamingJson, Response, CustErr>
     for JsonStream<T, CustErr>
 where
     Response: Res<CustErr>,
-    CustErr: 'static,
+    CustErr: CustomServerFnError + 'static,
     T: Serialize + 'static,
 {
-    async fn into_res(self) -> Result<Response, ServerFnError<CustErr>> {
+    async fn into_res(self) -> Result<Response, CustErr> {
         Response::try_from_stream(
             Streaming::CONTENT_TYPE,
             self.into_inner().map(|value| {
                 serde_json::to_vec(&value?)
                     .map(Bytes::from)
-                    .map_err(|e| ServerFnError::Serialization(e.to_string()))
+                    .map_err(|e| ServerFnErrorErr::Serialization(e.to_string()))
+                    .map_err(Into::into)
             }),
         )
     }
 }
 
 impl<CustErr, T, Response> FromRes<StreamingJson, Response, CustErr>
-    for JsonStream<T>
+    for JsonStream<T, CustErr>
 where
     Response: ClientRes<CustErr> + Send,
     T: DeserializeOwned,
+    CustErr: CustomServerFnError,
 {
-    async fn from_res(res: Response) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_res(res: Response) -> Result<Self, CustErr> {
         let stream = res.try_into_stream()?;
         Ok(JsonStream::new(stream.map(|chunk| {
             chunk.and_then(|bytes| {
                 serde_json::from_slice(bytes.as_ref())
-                    .map_err(|e| ServerFnError::Deserialization(e.to_string()))
+                    .map_err(|e| ServerFnErrorErr::Deserialization(e.to_string()))
+                    .map_err(Into::into)
             })
         })))
     }

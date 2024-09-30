@@ -1,6 +1,6 @@
 use super::{Encoding, FromReq};
 use crate::{
-    error::ServerFnError,
+    error::ServerFnErrorErr,
     request::{browser::BrowserFormData, ClientReq, Req},
     IntoReq,
 };
@@ -61,11 +61,7 @@ where
     Request: ClientReq<CustErr, FormData = BrowserFormData>,
     T: Into<MultipartData>,
 {
-    fn into_req(
-        self,
-        path: &str,
-        accepts: &str,
-    ) -> Result<Request, ServerFnError<CustErr>> {
+    fn into_req(self, path: &str, accepts: &str) -> Result<Request, CustErr> {
         let multi = self.into();
         Request::try_new_multipart(
             path,
@@ -81,7 +77,7 @@ where
     T: From<MultipartData>,
     CustErr: 'static,
 {
-    async fn from_req(req: Request) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_req(req: Request) -> Result<Self, CustErr> {
         let boundary = req
             .to_content_type()
             .and_then(|ct| multer::parse_boundary(ct).ok())

@@ -1,6 +1,6 @@
 use super::{Encoding, FromReq, IntoReq};
 use crate::{
-    error::ServerFnError,
+    error::{CustomServerFnError, ServerFnErrorErr},
     request::{ClientReq, Req},
 };
 use http::Method;
@@ -21,14 +21,11 @@ impl<CustErr, T, Request> IntoReq<GetUrl, Request, CustErr> for T
 where
     Request: ClientReq<CustErr>,
     T: Serialize + Send,
+    CustErr: CustomServerFnError,
 {
-    fn into_req(
-        self,
-        path: &str,
-        accepts: &str,
-    ) -> Result<Request, ServerFnError<CustErr>> {
+    fn into_req(self, path: &str, accepts: &str) -> Result<Request, CustErr> {
         let data = serde_qs::to_string(&self)
-            .map_err(|e| ServerFnError::Serialization(e.to_string()))?;
+            .map_err(|e| ServerFnErrorErr::Serialization(e.to_string()))?;
         Request::try_new_get(path, accepts, GetUrl::CONTENT_TYPE, &data)
     }
 }
@@ -37,12 +34,13 @@ impl<CustErr, T, Request> FromReq<GetUrl, Request, CustErr> for T
 where
     Request: Req<CustErr> + Send + 'static,
     T: DeserializeOwned,
+    CustErr: CustomServerFnError,
 {
-    async fn from_req(req: Request) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_req(req: Request) -> Result<Self, CustErr> {
         let string_data = req.as_query().unwrap_or_default();
         let args = serde_qs::Config::new(5, false)
             .deserialize_str::<Self>(string_data)
-            .map_err(|e| ServerFnError::Args(e.to_string()))?;
+            .map_err(|e| ServerFnErrorErr::Args(e.to_string()))?;
         Ok(args)
     }
 }
@@ -56,14 +54,11 @@ impl<CustErr, T, Request> IntoReq<PostUrl, Request, CustErr> for T
 where
     Request: ClientReq<CustErr>,
     T: Serialize + Send,
+    CustErr: CustomServerFnError,
 {
-    fn into_req(
-        self,
-        path: &str,
-        accepts: &str,
-    ) -> Result<Request, ServerFnError<CustErr>> {
+    fn into_req(self, path: &str, accepts: &str) -> Result<Request, CustErr> {
         let qs = serde_qs::to_string(&self)
-            .map_err(|e| ServerFnError::Serialization(e.to_string()))?;
+            .map_err(|e| ServerFnErrorErr::Serialization(e.to_string()))?;
         Request::try_new_post(path, accepts, PostUrl::CONTENT_TYPE, qs)
     }
 }
@@ -72,12 +67,13 @@ impl<CustErr, T, Request> FromReq<PostUrl, Request, CustErr> for T
 where
     Request: Req<CustErr> + Send + 'static,
     T: DeserializeOwned,
+    CustErr: CustomServerFnError,
 {
-    async fn from_req(req: Request) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_req(req: Request) -> Result<Self, CustErr> {
         let string_data = req.try_into_string().await?;
         let args = serde_qs::Config::new(5, false)
             .deserialize_str::<Self>(&string_data)
-            .map_err(|e| ServerFnError::Args(e.to_string()))?;
+            .map_err(|e| ServerFnErrorErr::Args(e.to_string()))?;
         Ok(args)
     }
 }
@@ -89,15 +85,15 @@ where
     Request: Req<CustErr> + Send,
     Response: Res<CustErr> + Send,
 {
-    async fn from_req(req: Request) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_req(req: Request) -> Result<Self, CustErr> {
         let string_data = req.try_into_string()?;
 
         let args = serde_json::from_str::<Self>(&string_data)
-            .map_err(|e| ServerFnError::Args(e.to_string()))?;
+            .map_err(|e| ServerFnErrorErr::Args(e.to_string()))?;
         Ok(args)
     }
 
-    async fn into_req(self) -> Result<Request, ServerFnError<CustErr>> {
+    async fn into_req(self) -> Result<Request, CustErr> {
         /* let qs = serde_qs::to_string(&self)?;
         let req = http::Request::builder()
             .method("GET")
@@ -110,7 +106,7 @@ where
         todo!()
     }
 
-    async fn from_res(res: Response) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_res(res: Response) -> Result<Self, CustErr> {
         todo!()
         /* let (_parts, body) = res.into_parts();
 
@@ -118,10 +114,10 @@ where
             .collect()
             .await
             .map(|c| c.to_bytes())
-            .map_err(|e| ServerFnError::Deserialization(e.to_string()))?;
+            .map_err(|e| ServerFnErrorErr::Deserialization(e.to_string()))?;
         let string_data = String::from_utf8(body_bytes.to_vec())?;
         serde_json::from_str(&string_data)
-            .map_err(|e| ServerFnError::Deserialization(e.to_string())) */
+            .map_err(|e| ServerFnErrorErr::Deserialization(e.to_string())) */
     }
 
     async fn into_res(self) -> Response {

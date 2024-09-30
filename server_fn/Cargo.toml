@@ -10,7 +10,6 @@ rust-version.workspace = true
 edition.workspace = true
 
 [dependencies]
-throw_error = { workspace = true }
 server_fn_macro_default = { workspace = true }
 # used for hashing paths in #[server] macro
 const_format = "0.2.32"

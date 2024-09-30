@@ -55,7 +55,6 @@ mod postcard;
 pub use postcard::*;
 
 mod stream;
-use crate::error::ServerFnError;
 use futures::Future;
 use http::Method;
 pub use stream::*;
@@ -80,10 +79,10 @@ pub use stream::*;
 ///         self,
 ///         path: &str,
 ///         accepts: &str,
-///     ) -> Result<Request, ServerFnError<CustErr>> {
+///     ) -> Result<Request, CustErr> {
 ///         // try to serialize the data
 ///         let data = serde_json::to_string(&self)
-///             .map_err(|e| ServerFnError::Serialization(e.to_string()))?;
+///             .map_err(|e| ServerFnErrorErr::Serialization(e.to_string()))?;
 ///         // and use it as the body of a POST request
 ///         Request::try_new_post(path, accepts, Json::CONTENT_TYPE, data)
 ///     }
@@ -91,11 +90,7 @@ pub use stream::*;
 /// ```
 pub trait IntoReq<Encoding, Request, CustErr> {
     /// Attempts to serialize the arguments into an HTTP request.
-    fn into_req(
-        self,
-        path: &str,
-        accepts: &str,
-    ) -> Result<Request, ServerFnError<CustErr>>;
+    fn into_req(self, path: &str, accepts: &str) -> Result<Request, CustErr>;
 }
 
 /// Deserializes an HTTP request into the data type, on the server.
@@ -118,12 +113,12 @@ pub trait IntoReq<Encoding, Request, CustErr> {
 /// {
 ///     async fn from_req(
 ///         req: Request,
-///     ) -> Result<Self, ServerFnError<CustErr>> {
+///     ) -> Result<Self, CustErr> {
 ///         // try to convert the body of the request into a `String`
 ///         let string_data = req.try_into_string().await?;
 ///         // deserialize the data
 ///         serde_json::from_str::<Self>(&string_data)
-///             .map_err(|e| ServerFnError::Args(e.to_string()))
+///             .map_err(|e| ServerFnErrorErr::Args(e.to_string()))
 ///     }
 /// }
 /// ```
@@ -134,7 +129,7 @@ where
     /// Attempts to deserialize the arguments from a request.
     fn from_req(
         req: Request,
-    ) -> impl Future<Output = Result<Self, ServerFnError<CustErr>>> + Send;
+    ) -> impl Future<Output = Result<Self, CustErr>> + Send;
 }
 
 /// Serializes the data type into an HTTP response.
@@ -153,10 +148,10 @@ where
 ///     Response: Res<CustErr>,
 ///     T: Serialize + Send,
 /// {
-///     async fn into_res(self) -> Result<Response, ServerFnError<CustErr>> {
+///     async fn into_res(self) -> Result<Response, CustErr> {
 ///         // try to serialize the data
 ///         let data = serde_json::to_string(&self)
-///             .map_err(|e| ServerFnError::Serialization(e.to_string()))?;
+///             .map_err(|e| ServerFnErrorErr::Serialization(e.to_string()))?;
 ///         // and use it as the body of a response
 ///         Response::try_from_string(Json::CONTENT_TYPE, data)
 ///     }
@@ -164,9 +159,8 @@ where
 /// ```
 pub trait IntoRes<Encoding, Response, CustErr> {
     /// Attempts to serialize the output into an HTTP response.
-    fn into_res(
-        self,
-    ) -> impl Future<Output = Result<Response, ServerFnError<CustErr>>> + Send;
+    fn into_res(self)
+        -> impl Future<Output = Result<Response, CustErr>> + Send;
 }
 
 /// Deserializes the data type from an HTTP response.
@@ -188,12 +182,12 @@ pub trait IntoRes<Encoding, Response, CustErr> {
 /// {
 ///     async fn from_res(
 ///         res: Response,
-///     ) -> Result<Self, ServerFnError<CustErr>> {
+///     ) -> Result<Self, CustErr> {
 ///         // extracts the request body
 ///         let data = res.try_into_string().await?;
 ///         // and tries to deserialize it as JSON
 ///         serde_json::from_str(&data)
-///             .map_err(|e| ServerFnError::Deserialization(e.to_string()))
+///             .map_err(|e| ServerFnErrorErr::Deserialization(e.to_string()))
 ///     }
 /// }
 /// ```
@@ -204,7 +198,7 @@ where
     /// Attempts to deserialize the outputs from a response.
     fn from_res(
         res: Response,
-    ) -> impl Future<Output = Result<Self, ServerFnError<CustErr>>> + Send;
+    ) -> impl Future<Output = Result<Self, CustErr>> + Send;
 }
 
 /// Defines a particular encoding format, which can be used for serializing or deserializing data.

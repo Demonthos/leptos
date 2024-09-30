@@ -125,7 +125,8 @@ where
                     );
                     value.set(Some(Err(ServerFnError::Serialization(
                         err.to_string(),
-                    ))));
+                    )
+                    .into())));
                     version.update(|n| *n += 1);
                 }
             }
@@ -193,7 +194,8 @@ where
             Err(err) => {
                 action.dispatch_sync(Err(ServerFnError::Serialization(
                     err.to_string(),
-                )));
+                )
+                .into()));
             }
         }
     };

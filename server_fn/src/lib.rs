@@ -37,7 +37,7 @@
 //!
 //! ```rust,ignore
 //! #[server]
-//! async fn read_posts(how_many: usize, query: String) -> Result<Vec<Posts>, ServerFnError> {
+//! async fn read_posts(how_many: usize, query: String) -> Result<Vec<Posts>, ServerFnErrorErr> {
 //!   // do some server-only work here to access the database
 //!   let posts = ...;
 //!   Ok(posts)
@@ -60,9 +60,9 @@
 //! - **Server functions must be `async`.** Even if the work being done inside the function body
 //!   can run synchronously on the server, from the client’s perspective it involves an asynchronous
 //!   function call.
-//! - **Server functions must return `Result<T, ServerFnError>`.** Even if the work being done
+//! - **Server functions must return `Result<T, ServerFnErrorErr>`.** Even if the work being done
 //!   inside the function body can’t fail, the processes of serialization/deserialization and the
-//!   network call are fallible. [`ServerFnError`] can receive generic errors.
+//!   network call are fallible. [`ServerFnErrorErr`] can receive generic errors.
 //! - **Server functions are part of the public API of your application.** A server function is an
 //!   ad hoc HTTP API endpoint, not a magic formula. Any server function can be accessed by any HTTP
 //!   client. You should take care to sanitize any data being returned from the function to ensure it
@@ -125,10 +125,10 @@ use codec::{Encoding, FromReq, FromRes, IntoReq, IntoRes};
 #[doc(hidden)]
 pub use const_format;
 use dashmap::DashMap;
-pub use error::ServerFnError;
-use error::ServerFnErrorSerde;
+pub use error::ServerFnErrorErr;
 #[cfg(feature = "form-redirects")]
 use error::ServerFnUrlError;
+use error::{CustomServerFnError, ServerFnErrorSerde};
 use http::Method;
 use middleware::{Layer, Service};
 use once_cell::sync::Lazy;
@@ -142,7 +142,7 @@ pub use serde;
 #[doc(hidden)]
 #[cfg(feature = "serde-lite")]
 pub use serde_lite;
-use std::{fmt::Display, future::Future, pin::Pin, str::FromStr, sync::Arc};
+use std::{future::Future, pin::Pin, sync::Arc};
 #[doc(hidden)]
 pub use xxhash_rust;
 
@@ -155,7 +155,7 @@ pub use xxhash_rust;
 /// In other words,
 /// ```rust,ignore
 /// #[server]
-/// pub async fn my_function(foo: String, bar: usize) -> Result<usize, ServerFnError> {
+/// pub async fn my_function(foo: String, bar: usize) -> Result<usize, ServerFnErrorErr> {
 ///     Ok(foo.len() + bar)
 /// }
 /// ```
@@ -168,7 +168,7 @@ pub use xxhash_rust;
 /// }
 ///
 /// impl ServerFn for MyFunction {
-///     async fn run_body() -> Result<usize, ServerFnError> {
+///     async fn run_body() -> Result<usize, ServerFnErrorErr> {
 ///         Ok(foo.len() + bar)
 ///     }
 ///
@@ -216,9 +216,10 @@ where
     /// The [`Encoding`] used in the response for the result of the server function.
     type OutputEncoding: Encoding;
 
-    /// The type of the custom error on [`ServerFnError`], if any. (If there is no
+    /// The type of the error that the server function may return. It must
+    /// be constructable from [`ServerFnErrorErr`]. (If there is no
     /// custom error type, this can be `NoCustomError` by default.)
-    type Error: FromStr + Display;
+    type Error: CustomServerFnError;
 
     /// Returns [`Self::PATH`].
     fn url() -> &'static str {
@@ -234,7 +235,7 @@ where
     /// The body of the server function. This will only run on the server.
     fn run_body(
         self,
-    ) -> impl Future<Output = Result<Self::Output, ServerFnError<Self::Error>>> + Send;
+    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send;
 
     #[doc(hidden)]
     fn run_on_server(
@@ -275,10 +276,10 @@ where
                         referer = Some(url.to_string());
                     }
                 }
-                // otherwise, strip error info from referer URL, as that means it's from a previous
+                // otherwise, strip error info from referrer URL, as that means it's from a previous
                 // call
                 else if let Some(referer) = referer.as_mut() {
-                    ServerFnUrlError::<Self::Error>::strip_error_info(referer)
+                    ServerFnUrlError::strip_error_info(referer)
                 }
 
                 // set the status code and Location header
@@ -292,8 +293,7 @@ where
     #[doc(hidden)]
     fn run_on_client(
         self,
-    ) -> impl Future<Output = Result<Self::Output, ServerFnError<Self::Error>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
         async move {
             // create and send request on client
             let req =
@@ -307,8 +307,7 @@ where
     fn run_on_client_with_req(
         req: <Self::Client as Client<Self::Error>>::Request,
         redirect_hook: Option<&RedirectHook>,
-    ) -> impl Future<Output = Result<Self::Output, ServerFnError<Self::Error>>> + Send
-    {
+    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
         async move {
             let res = Self::Client::send(req).await?;
 
@@ -319,7 +318,7 @@ where
             // if it returns an error status, deserialize the error using FromStr
             let res = if (400..=599).contains(&status) {
                 let text = res.try_into_string().await?;
-                Err(ServerFnError::<Self::Error>::de(&text))
+                Err(Self::Error::de(&text))
             } else {
                 // otherwise, deserialize the body as is
                 Ok(Self::Output::from_res(res).await)
@@ -339,9 +338,8 @@ where
     #[doc(hidden)]
     fn execute_on_server(
         req: Self::ServerRequest,
-    ) -> impl Future<
-        Output = Result<Self::ServerResponse, ServerFnError<Self::Error>>,
-    > + Send {
+    ) -> impl Future<Output = Result<Self::ServerResponse, Self::Error>> + Send
+    {
         async {
             let this = Self::from_req(req).await?;
             let output = this.run_body().await?;

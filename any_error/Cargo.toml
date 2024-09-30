@@ -11,3 +11,4 @@ edition.workspace = true
 
 [dependencies]
 pin-project-lite = "0.2.14"
+server_fn = { workspace = true, default-features = false }

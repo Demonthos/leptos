@@ -1,4 +1,4 @@
-use crate::error::ServerFnError;
+use crate::error::ServerFnErrorErr;
 use bytes::Bytes;
 use futures::Stream;
 use std::{borrow::Cow, future::Future};
@@ -30,7 +30,7 @@ where
         content_type: &str,
         accepts: &str,
         query: &str,
-    ) -> Result<Self, ServerFnError<CustErr>>;
+    ) -> Result<Self, CustErr>;
 
     /// Attempts to construct a new `POST` request with a text body.
     fn try_new_post(
@@ -38,7 +38,7 @@ where
         content_type: &str,
         accepts: &str,
         body: String,
-    ) -> Result<Self, ServerFnError<CustErr>>;
+    ) -> Result<Self, CustErr>;
 
     /// Attempts to construct a new `POST` request with a binary body.
     fn try_new_post_bytes(
@@ -46,7 +46,7 @@ where
         content_type: &str,
         accepts: &str,
         body: Bytes,
-    ) -> Result<Self, ServerFnError<CustErr>>;
+    ) -> Result<Self, CustErr>;
 
     /// Attempts to construct a new `POST` request with form data as the body.
     fn try_new_post_form_data(
@@ -54,14 +54,14 @@ where
         accepts: &str,
         content_type: &str,
         body: Self::FormData,
-    ) -> Result<Self, ServerFnError<CustErr>>;
+    ) -> Result<Self, CustErr>;
 
     /// Attempts to construct a new `POST` request with a multipart body.
     fn try_new_multipart(
         path: &str,
         accepts: &str,
         body: Self::FormData,
-    ) -> Result<Self, ServerFnError<CustErr>>;
+    ) -> Result<Self, CustErr>;
 
     /// Attempts to construct a new `POST` request with a streaming body.
     fn try_new_streaming(
@@ -69,7 +69,7 @@ where
         accepts: &str,
         content_type: &str,
         body: impl Stream<Item = Bytes> + Send + 'static,
-    ) -> Result<Self, ServerFnError<CustErr>>;
+    ) -> Result<Self, CustErr>;
 }
 
 /// Represents the request as received by the server.
@@ -92,19 +92,19 @@ where
     /// Attempts to extract the body of the request into [`Bytes`].
     fn try_into_bytes(
         self,
-    ) -> impl Future<Output = Result<Bytes, ServerFnError<CustErr>>> + Send;
+    ) -> impl Future<Output = Result<Bytes, CustErr>> + Send;
 
     /// Attempts to convert the body of the request into a string.
     fn try_into_string(
         self,
-    ) -> impl Future<Output = Result<String, ServerFnError<CustErr>>> + Send;
+    ) -> impl Future<Output = Result<String, CustErr>> + Send;
 
     /// Attempts to convert the body of the request into a stream of bytes.
     fn try_into_stream(
         self,
     ) -> Result<
-        impl Stream<Item = Result<Bytes, ServerFnError>> + Send + 'static,
-        ServerFnError<CustErr>,
+        impl Stream<Item = Result<Bytes, ServerFnErrorErr>> + Send + 'static,
+        CustErr,
     >;
 }
 
@@ -131,20 +131,18 @@ where
     fn referer(&self) -> Option<Cow<'_, str>> {
         unreachable!()
     }
-    async fn try_into_bytes(self) -> Result<Bytes, ServerFnError<CustErr>> {
+    async fn try_into_bytes(self) -> Result<Bytes, CustErr> {
         unreachable!()
     }
 
-    async fn try_into_string(self) -> Result<String, ServerFnError<CustErr>> {
+    async fn try_into_string(self) -> Result<String, CustErr> {
         unreachable!()
     }
 
     fn try_into_stream(
         self,
-    ) -> Result<
-        impl Stream<Item = Result<Bytes, ServerFnError>> + Send,
-        ServerFnError<CustErr>,
-    > {
+    ) -> Result<impl Stream<Item = Result<Bytes, ServerFnErrorErr>> + Send, CustErr>
+    {
         Ok(futures::stream::once(async { unreachable!() }))
     }
 }

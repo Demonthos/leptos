@@ -1,6 +1,6 @@
 use super::Res;
 use crate::error::{
-    ServerFnError, ServerFnErrorErr, ServerFnErrorSerde, SERVER_FN_ERROR_HEADER,
+    ServerFnErrorErr, ServerFnErrorErr, ServerFnErrorSerde, SERVER_FN_ERROR_HEADER,
 };
 use actix_web::{
     http::{
@@ -45,7 +45,7 @@ where
     fn try_from_string(
         content_type: &str,
         data: String,
-    ) -> Result<Self, ServerFnError<CustErr>> {
+    ) -> Result<Self, CustErr> {
         let mut builder = HttpResponse::build(StatusCode::OK);
         Ok(ActixResponse(SendWrapper::new(
             builder
@@ -57,7 +57,7 @@ where
     fn try_from_bytes(
         content_type: &str,
         data: Bytes,
-    ) -> Result<Self, ServerFnError<CustErr>> {
+    ) -> Result<Self, CustErr> {
         let mut builder = HttpResponse::build(StatusCode::OK);
         Ok(ActixResponse(SendWrapper::new(
             builder
@@ -68,8 +68,8 @@ where
 
     fn try_from_stream(
         content_type: &str,
-        data: impl Stream<Item = Result<Bytes, ServerFnError<CustErr>>> + 'static,
-    ) -> Result<Self, ServerFnError<CustErr>> {
+        data: impl Stream<Item = Result<Bytes, CustErr>> + 'static,
+    ) -> Result<Self, CustErr> {
         let mut builder = HttpResponse::build(StatusCode::OK);
         Ok(ActixResponse(SendWrapper::new(
             builder
@@ -80,7 +80,7 @@ where
         )))
     }
 
-    fn error_response(path: &str, err: &ServerFnError<CustErr>) -> Self {
+    fn error_response(path: &str, err: &CustErr) -> Self {
         ActixResponse(SendWrapper::new(
             HttpResponse::build(StatusCode::INTERNAL_SERVER_ERROR)
                 .append_header((SERVER_FN_ERROR_HEADER, path))

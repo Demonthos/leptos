@@ -1,4 +1,4 @@
-use crate::{error::ServerFnError, request::ClientReq, response::ClientRes};
+use crate::{request::ClientReq, response::ClientRes};
 use std::{future::Future, sync::OnceLock};
 
 static ROOT_URL: OnceLock<&'static str> = OnceLock::new();
@@ -30,7 +30,7 @@ pub trait Client<CustErr> {
     /// Sends the request and receives a response.
     fn send(
         req: Self::Request,
-    ) -> impl Future<Output = Result<Self::Response, ServerFnError<CustErr>>> + Send;
+    ) -> impl Future<Output = Result<Self::Response, CustErr>> + Send;
 }
 
 #[cfg(feature = "browser")]
@@ -38,7 +38,7 @@ pub trait Client<CustErr> {
 pub mod browser {
     use super::Client;
     use crate::{
-        error::ServerFnError,
+        error::{CustomServerFnError, ServerFnErrorErr},
         request::browser::{BrowserRequest, RequestInner},
         response::browser::BrowserResponse,
     };
@@ -48,14 +48,17 @@ pub mod browser {
     /// Implements [`Client`] for a `fetch` request in the browser.    
     pub struct BrowserClient;
 
-    impl<CustErr> Client<CustErr> for BrowserClient {
+    impl<CustErr> Client<CustErr> for BrowserClient
+    where
+        CustErr: CustomServerFnError,
+    {
         type Request = BrowserRequest;
         type Response = BrowserResponse;
 
         fn send(
             req: Self::Request,
-        ) -> impl Future<Output = Result<Self::Response, ServerFnError<CustErr>>>
-               + Send {
+        ) -> impl Future<Output = Result<Self::Response, CustErr>> + Send
+        {
             SendWrapper::new(async move {
                 let req = req.0.take();
                 let RequestInner {
@@ -66,7 +69,8 @@ pub mod browser {
                     .send()
                     .await
                     .map(|res| BrowserResponse(SendWrapper::new(res)))
-                    .map_err(|e| ServerFnError::Request(e.to_string()));
+                    .map_err(|e| ServerFnErrorErr::Request(e.to_string()))
+                    .map_err(Into::into);
 
                 // at this point, the future has successfully resolved without being dropped, so we
                 // can prevent the `AbortController` from firing
@@ -83,7 +87,7 @@ pub mod browser {
 /// Implements [`Client`] for a request made by [`reqwest`].
 pub mod reqwest {
     use super::Client;
-    use crate::{error::ServerFnError, request::reqwest::CLIENT};
+    use crate::{error::ServerFnErrorErr, request::reqwest::CLIENT};
     use futures::TryFutureExt;
     use reqwest::{Request, Response};
     use std::future::Future;
@@ -97,11 +101,11 @@ pub mod reqwest {
 
         fn send(
             req: Self::Request,
-        ) -> impl Future<Output = Result<Self::Response, ServerFnError<CustErr>>>
-               + Send {
+        ) -> impl Future<Output = Result<Self::Response, CustErr>> + Send
+        {
             CLIENT
                 .execute(req)
-                .map_err(|e| ServerFnError::Request(e.to_string()))
+                .map_err(|e| ServerFnErrorErr::Request(e.to_string()))
         }
     }
 }

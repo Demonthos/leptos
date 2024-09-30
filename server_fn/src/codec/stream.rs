@@ -1,6 +1,6 @@
 use super::{Encoding, FromReq, FromRes, IntoReq};
 use crate::{
-    error::{NoCustomError, ServerFnError},
+    error::{CustomServerFnError, ServerFnErrorErr},
     request::{ClientReq, Req},
     response::{ClientRes, Res},
     IntoRes,
@@ -34,11 +34,7 @@ where
     Request: ClientReq<CustErr>,
     T: Stream<Item = Bytes> + Send + Sync + 'static,
 {
-    fn into_req(
-        self,
-        path: &str,
-        accepts: &str,
-    ) -> Result<Request, ServerFnError<CustErr>> {
+    fn into_req(self, path: &str, accepts: &str) -> Result<Request, CustErr> {
         Request::try_new_streaming(path, accepts, Streaming::CONTENT_TYPE, self)
     }
 }
@@ -48,7 +44,7 @@ where
     Request: Req<CustErr> + Send + 'static,
     T: From<ByteStream> + 'static,
 {
-    async fn from_req(req: Request) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_req(req: Request) -> Result<Self, CustErr> {
         let data = req.try_into_stream()?;
         let s = ByteStream::new(data);
         Ok(s.into())
@@ -67,15 +63,15 @@ where
 /// end before the output will begin.
 ///
 /// Streaming requests are only allowed over HTTP2 or HTTP3.
-pub struct ByteStream<CustErr = NoCustomError>(
-    Pin<Box<dyn Stream<Item = Result<Bytes, ServerFnError<CustErr>>> + Send>>,
+pub struct ByteStream<CustErr = ServerFnErrorErr>(
+    Pin<Box<dyn Stream<Item = Result<Bytes, CustErr>> + Send>>,
 );
 
 impl<CustErr> ByteStream<CustErr> {
     /// Consumes the wrapper, returning a stream of bytes.
     pub fn into_inner(
         self,
-    ) -> impl Stream<Item = Result<Bytes, ServerFnError<CustErr>>> + Send {
+    ) -> impl Stream<Item = Result<Bytes, CustErr>> + Send {
         self.0
     }
 }
@@ -89,7 +85,7 @@ impl<CustErr> Debug for ByteStream<CustErr> {
 impl ByteStream {
     /// Creates a new `ByteStream` from the given stream.
     pub fn new<T>(
-        value: impl Stream<Item = Result<T, ServerFnError>> + Send + 'static,
+        value: impl Stream<Item = Result<T, ServerFnErrorErr>> + Send + 'static,
     ) -> Self
     where
         T: Into<Bytes>,
@@ -114,16 +110,17 @@ where
     Response: Res<CustErr>,
     CustErr: 'static,
 {
-    async fn into_res(self) -> Result<Response, ServerFnError<CustErr>> {
+    async fn into_res(self) -> Result<Response, CustErr> {
         Response::try_from_stream(Streaming::CONTENT_TYPE, self.into_inner())
     }
 }
 
-impl<CustErr, Response> FromRes<Streaming, Response, CustErr> for ByteStream
+impl<CustErr, Response> FromRes<Streaming, Response, CustErr>
+    for ByteStream<CustErr>
 where
     Response: ClientRes<CustErr> + Send,
 {
-    async fn from_res(res: Response) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_res(res: Response) -> Result<Self, CustErr> {
         let stream = res.try_into_stream()?;
         Ok(ByteStream(Box::pin(stream)))
     }
@@ -160,8 +157,8 @@ impl Encoding for StreamingText {
 /// end before the output will begin.
 ///
 /// Streaming requests are only allowed over HTTP2 or HTTP3.
-pub struct TextStream<CustErr = NoCustomError>(
-    Pin<Box<dyn Stream<Item = Result<String, ServerFnError<CustErr>>> + Send>>,
+pub struct TextStream<CustErr = ServerFnErrorErr>(
+    Pin<Box<dyn Stream<Item = Result<String, CustErr>> + Send>>,
 );
 
 impl<CustErr> Debug for TextStream<CustErr> {
@@ -173,7 +170,7 @@ impl<CustErr> Debug for TextStream<CustErr> {
 impl TextStream {
     /// Creates a new `ByteStream` from the given stream.
     pub fn new(
-        value: impl Stream<Item = Result<String, ServerFnError>> + Send + 'static,
+        value: impl Stream<Item = Result<String, ServerFnErrorErr>> + Send + 'static,
     ) -> Self {
         Self(Box::pin(value.map(|value| value.map(Into::into))))
     }
@@ -183,7 +180,7 @@ impl<CustErr> TextStream<CustErr> {
     /// Consumes the wrapper, returning a stream of text.
     pub fn into_inner(
         self,
-    ) -> impl Stream<Item = Result<String, ServerFnError<CustErr>>> + Send {
+    ) -> impl Stream<Item = Result<String, CustErr>> + Send {
         self.0
     }
 }
@@ -203,11 +200,7 @@ where
     Request: ClientReq<CustErr>,
     T: Into<TextStream>,
 {
-    fn into_req(
-        self,
-        path: &str,
-        accepts: &str,
-    ) -> Result<Request, ServerFnError<CustErr>> {
+    fn into_req(self, path: &str, accepts: &str) -> Result<Request, CustErr> {
         let data = self.into();
         Request::try_new_streaming(
             path,
@@ -223,12 +216,12 @@ where
     Request: Req<CustErr> + Send + 'static,
     T: From<TextStream> + 'static,
 {
-    async fn from_req(req: Request) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_req(req: Request) -> Result<Self, CustErr> {
         let data = req.try_into_stream()?;
         let s = TextStream::new(data.map(|chunk| {
             chunk.and_then(|bytes| {
                 String::from_utf8(bytes.to_vec())
-                    .map_err(|e| ServerFnError::Deserialization(e.to_string()))
+                    .map_err(|e| ServerFnErrorErr::Deserialization(e.to_string()))
             })
         }));
         Ok(s.into())
@@ -241,7 +234,7 @@ where
     Response: Res<CustErr>,
     CustErr: 'static,
 {
-    async fn into_res(self) -> Result<Response, ServerFnError<CustErr>> {
+    async fn into_res(self) -> Result<Response, CustErr> {
         Response::try_from_stream(
             Streaming::CONTENT_TYPE,
             self.into_inner().map(|stream| stream.map(Into::into)),
@@ -249,16 +242,19 @@ where
     }
 }
 
-impl<CustErr, Response> FromRes<StreamingText, Response, CustErr> for TextStream
+impl<CustErr, Response> FromRes<StreamingText, Response, CustErr>
+    for TextStream<CustErr>
 where
     Response: ClientRes<CustErr> + Send,
+    CustErr: CustomServerFnError,
 {
-    async fn from_res(res: Response) -> Result<Self, ServerFnError<CustErr>> {
+    async fn from_res(res: Response) -> Result<Self, CustErr> {
         let stream = res.try_into_stream()?;
         Ok(TextStream(Box::pin(stream.map(|chunk| {
             chunk.and_then(|bytes| {
-                String::from_utf8(bytes.into())
-                    .map_err(|e| ServerFnError::Deserialization(e.to_string()))
+                Ok(String::from_utf8(bytes.into()).map_err(|e| {
+                    ServerFnErrorErr::Deserialization(e.to_string())
+                })?)
             })
         }))))
     }

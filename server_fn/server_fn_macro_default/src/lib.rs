@@ -17,7 +17,7 @@ use syn::__private::ToTokens;
 /// #[server]
 /// pub async fn blog_posts(
 ///     category: String,
-/// ) -> Result<Vec<BlogPost>, ServerFnError> {
+/// ) -> Result<Vec<BlogPost>, ServerFnErrorErr> {
 ///     let posts = load_posts(&category).await?;
 ///     // maybe do some other work
 ///     Ok(posts)
@@ -52,7 +52,7 @@ use syn::__private::ToTokens;
 ///   input = Cbor,
 ///   output = Json
 /// )]
-/// pub async fn my_wacky_server_fn(input: Vec<String>) -> Result<usize, ServerFnError> {
+/// pub async fn my_wacky_server_fn(input: Vec<String>) -> Result<usize, ServerFnErrorErr> {
 ///   todo!()
 /// }
 ///

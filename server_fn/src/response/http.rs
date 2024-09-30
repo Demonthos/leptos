@@ -1,6 +1,6 @@
 use super::Res;
 use crate::error::{
-    ServerFnError, ServerFnErrorErr, ServerFnErrorSerde, SERVER_FN_ERROR_HEADER,
+    ServerFnErrorErr, ServerFnErrorErr, ServerFnErrorSerde, SERVER_FN_ERROR_HEADER,
 };
 use axum::body::Body;
 use bytes::Bytes;
@@ -18,33 +18,31 @@ where
     fn try_from_string(
         content_type: &str,
         data: String,
-    ) -> Result<Self, ServerFnError<CustErr>> {
+    ) -> Result<Self, CustErr> {
         let builder = http::Response::builder();
         builder
             .status(200)
             .header(http::header::CONTENT_TYPE, content_type)
             .body(Body::from(data))
-            .map_err(|e| ServerFnError::Response(e.to_string()))
+            .map_err(|e| ServerFnErrorErr::Response(e.to_string()))
     }
 
     fn try_from_bytes(
         content_type: &str,
         data: Bytes,
-    ) -> Result<Self, ServerFnError<CustErr>> {
+    ) -> Result<Self, CustErr> {
         let builder = http::Response::builder();
         builder
             .status(200)
             .header(http::header::CONTENT_TYPE, content_type)
             .body(Body::from(data))
-            .map_err(|e| ServerFnError::Response(e.to_string()))
+            .map_err(|e| ServerFnErrorErr::Response(e.to_string()))
     }
 
     fn try_from_stream(
         content_type: &str,
-        data: impl Stream<Item = Result<Bytes, ServerFnError<CustErr>>>
-            + Send
-            + 'static,
-    ) -> Result<Self, ServerFnError<CustErr>> {
+        data: impl Stream<Item = Result<Bytes, CustErr>> + Send + 'static,
+    ) -> Result<Self, CustErr> {
         let body =
             Body::from_stream(data.map(|n| n.map_err(ServerFnErrorErr::from)));
         let builder = http::Response::builder();
@@ -52,10 +50,10 @@ where
             .status(200)
             .header(http::header::CONTENT_TYPE, content_type)
             .body(body)
-            .map_err(|e| ServerFnError::Response(e.to_string()))
+            .map_err(|e| ServerFnErrorErr::Response(e.to_string()))
     }
 
-    fn error_response(path: &str, err: &ServerFnError<CustErr>) -> Self {
+    fn error_response(path: &str, err: &CustErr) -> Self {
         Response::builder()
             .status(http::StatusCode::INTERNAL_SERVER_ERROR)
             .header(SERVER_FN_ERROR_HEADER, path)

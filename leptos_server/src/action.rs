@@ -3,7 +3,7 @@ use reactive_graph::{
     owner::use_context,
     traits::DefinedAt,
 };
-use server_fn::{error::ServerFnErrorSerde, ServerFn, ServerFnError};
+use server_fn::{error::ServerFnErrorSerde, ServerFn};
 use std::{ops::Deref, panic::Location, sync::Arc};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,7 +34,7 @@ where
     S: ServerFn + 'static,
     S::Output: 'static,
 {
-    inner: ArcAction<S, Result<S::Output, ServerFnError<S::Error>>>,
+    inner: ArcAction<S, Result<S::Output, S::Error>>,
     #[cfg(debug_assertions)]
     defined_at: &'static Location<'static>,
 }
@@ -49,7 +49,7 @@ where
     pub fn new() -> Self {
         let err = use_context::<ServerActionError>().and_then(|error| {
             (error.path() == S::PATH)
-                .then(|| ServerFnError::<S::Error>::de(error.err()))
+                .then(|| <S::Error>::de(error.err()))
                 .map(Err)
         });
         Self {
@@ -67,7 +67,7 @@ where
     S: ServerFn + 'static,
     S::Output: 'static,
 {
-    type Target = ArcAction<S, Result<S::Output, ServerFnError<S::Error>>>;
+    type Target = ArcAction<S, Result<S::Output, S::Error>>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -121,7 +121,7 @@ where
     S: ServerFn + 'static,
     S::Output: 'static,
 {
-    inner: Action<S, Result<S::Output, ServerFnError<S::Error>>>,
+    inner: Action<S, Result<S::Output, S::Error>>,
     #[cfg(debug_assertions)]
     defined_at: &'static Location<'static>,
 }
@@ -135,7 +135,7 @@ where
     pub fn new() -> Self {
         let err = use_context::<ServerActionError>().and_then(|error| {
             (error.path() == S::PATH)
-                .then(|| ServerFnError::<S::Error>::de(error.err()))
+                .then(|| <S::Error>::de(error.err()))
                 .map(Err)
         });
         Self {
@@ -171,15 +171,14 @@ where
     S::Output: Send + Sync + 'static,
     S::Error: Send + Sync + 'static,
 {
-    type Target = Action<S, Result<S::Output, ServerFnError<S::Error>>>;
+    type Target = Action<S, Result<S::Output, S::Error>>;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
-impl<S> From<ServerAction<S>>
-    for Action<S, Result<S::Output, ServerFnError<S::Error>>>
+impl<S> From<ServerAction<S>> for Action<S, Result<S::Output, S::Error>>
 where
     S: ServerFn + 'static,
     S::Output: 'static,

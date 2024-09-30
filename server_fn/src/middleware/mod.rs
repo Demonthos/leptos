@@ -29,7 +29,7 @@ pub trait Service<Request, Response> {
 #[cfg(feature = "axum-no-default")]
 mod axum {
     use super::{BoxedService, Service};
-    use crate::{response::Res, ServerFnError};
+    use crate::{response::Res, ServerFnErrorErr};
     use axum::body::Body;
     use http::{Request, Response};
     use std::{
@@ -42,7 +42,7 @@ mod axum {
     where
         S: tower::Service<Request<Body>, Response = Response<Body>>,
         S::Future: Send + 'static,
-        S::Error: Into<ServerFnError> + Send + Debug + Display + Sync + 'static,
+        S::Error: Into<ServerFnErrorErr> + Send + Debug + Display + Sync + 'static,
     {
         fn run(
             &mut self,
@@ -52,7 +52,7 @@ mod axum {
             let inner = self.call(req);
             Box::pin(async move {
                 inner.await.unwrap_or_else(|e| {
-                    let err = ServerFnError::new(e);
+                    let err = ServerFnErrorErr::new(e);
                     Response::<Body>::error_response(&path, &err)
                 })
             })
@@ -63,7 +63,7 @@ mod axum {
         for BoxedService<Request<Body>, Response<Body>>
     {
         type Response = Response<Body>;
-        type Error = ServerFnError;
+        type Error = ServerFnErrorErr;
         type Future = Pin<
             Box<
                 dyn std::future::Future<
@@ -107,7 +107,7 @@ mod actix {
     use crate::{
         request::actix::ActixRequest,
         response::{actix::ActixResponse, Res},
-        ServerFnError,
+        ServerFnErrorErr,
     };
     use actix_web::{HttpRequest, HttpResponse};
     use std::{
@@ -120,7 +120,7 @@ mod actix {
     where
         S: actix_web::dev::Service<HttpRequest, Response = HttpResponse>,
         S::Future: Send + 'static,
-        S::Error: Into<ServerFnError> + Debug + Display + 'static,
+        S::Error: Into<ServerFnErrorErr> + Debug + Display + 'static,
     {
         fn run(
             &mut self,
@@ -130,7 +130,7 @@ mod actix {
             let inner = self.call(req);
             Box::pin(async move {
                 inner.await.unwrap_or_else(|e| {
-                    let err = ServerFnError::new(e);
+                    let err = ServerFnErrorErr::new(e);
                     ActixResponse::error_response(&path, &err).take()
                 })
             })
@@ -141,7 +141,7 @@ mod actix {
     where
         S: actix_web::dev::Service<HttpRequest, Response = HttpResponse>,
         S::Future: Send + 'static,
-        S::Error: Into<ServerFnError> + Debug + Display + 'static,
+        S::Error: Into<ServerFnErrorErr> + Debug + Display + 'static,
     {
         fn run(
             &mut self,
@@ -151,7 +151,7 @@ mod actix {
             let inner = self.call(req.0.take().0);
             Box::pin(async move {
                 ActixResponse::from(inner.await.unwrap_or_else(|e| {
-                    let err = ServerFnError::new(e);
+                    let err = ServerFnErrorErr::new(e);
                     ActixResponse::error_response(&path, &err).take()
                 }))
             })

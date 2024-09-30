@@ -1,4 +1,4 @@
-use crate::{error::ServerFnError, request::Req};
+use crate::{error::ServerFnErrorErr, request::Req};
 use actix_web::{web::Payload, HttpRequest};
 use bytes::Bytes;
 use futures::Stream;
@@ -55,8 +55,7 @@ where
 
     fn try_into_bytes(
         self,
-    ) -> impl Future<Output = Result<Bytes, ServerFnError<CustErr>>> + Send
-    {
+    ) -> impl Future<Output = Result<Bytes, CustErr>> + Send {
         // Actix is going to keep this on a single thread anyway so it's fine to wrap it
         // with SendWrapper, which makes it `Send` but will panic if it moves to another thread
         SendWrapper::new(async move {
@@ -64,14 +63,13 @@ where
             payload
                 .to_bytes()
                 .await
-                .map_err(|e| ServerFnError::Deserialization(e.to_string()))
+                .map_err(|e| ServerFnErrorErr::Deserialization(e.to_string()))
         })
     }
 
     fn try_into_string(
         self,
-    ) -> impl Future<Output = Result<String, ServerFnError<CustErr>>> + Send
-    {
+    ) -> impl Future<Output = Result<String, CustErr>> + Send {
         // Actix is going to keep this on a single thread anyway so it's fine to wrap it
         // with SendWrapper, which makes it `Send` but will panic if it moves to another thread
         SendWrapper::new(async move {
@@ -79,18 +77,16 @@ where
             let bytes = payload
                 .to_bytes()
                 .await
-                .map_err(|e| ServerFnError::Deserialization(e.to_string()))?;
+                .map_err(|e| ServerFnErrorErr::Deserialization(e.to_string()))?;
             String::from_utf8(bytes.into())
-                .map_err(|e| ServerFnError::Deserialization(e.to_string()))
+                .map_err(|e| ServerFnErrorErr::Deserialization(e.to_string()))
         })
     }
 
     fn try_into_stream(
         self,
-    ) -> Result<
-        impl Stream<Item = Result<Bytes, ServerFnError>> + Send,
-        ServerFnError<CustErr>,
-    > {
+    ) -> Result<impl Stream<Item = Result<Bytes, ServerFnErrorErr>> + Send, CustErr>
+    {
         Ok(futures::stream::once(async { todo!() }))
     }
 }
